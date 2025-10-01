@@ -1,14 +1,15 @@
 import { useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { 
-  ArrowLeft, 
-  Upload, 
-  Camera, 
+import {
+  ArrowLeft,
+  Upload,
+  Camera,
   Play,
   Square,
   RotateCcw
 } from 'lucide-react';
+import { BackendStatus } from '@/components/BackendStatus';
 
 interface WorkoutUploadScreenProps {
   activityName: string;
@@ -249,6 +250,9 @@ const WorkoutUploadScreen = ({ activityName, onBack, onVideoSelected }: WorkoutU
       </div>
 
       <div className="px-4 pb-20 max-w-md mx-auto pt-6 space-y-6">
+        {/* Backend Status */}
+        <BackendStatus />
+
         {/* Activity Overview */}
         <Card className="card-elevated">
           <CardContent className="p-6 text-center">

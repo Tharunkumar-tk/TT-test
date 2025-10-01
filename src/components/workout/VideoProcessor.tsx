@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { ArrowLeft, TriangleAlert as AlertTriangle, Shield, Upload, Camera, CircleCheck as CheckCircle, Circle as XCircle, Trophy, Coins, Play } from 'lucide-react';
 import { toast } from '@/components/ui/sonner';
+import { processWorkout, formatMetricsForDisplay, type WorkoutMetrics, type WorkoutResult } from '@/services/workoutService';
 
 interface VideoProcessorProps {
   videoFile: File | null;
@@ -17,11 +18,10 @@ interface VideoProcessorProps {
 interface ProcessingResult {
   type: 'good' | 'bad' | 'poor' | 'anomaly';
   posture?: 'Good' | 'Bad';
-  setsCompleted?: number;
-  badSets?: number;
-  duration?: string;
   message?: string;
   videoUrl?: string;
+  metrics?: WorkoutMetrics;
+  formattedMetrics?: Array<{ label: string; value: string | number }>;
 }
 
 const VideoProcessor = ({ videoFile, activityName, onBack, onRetry, onComplete }: VideoProcessorProps) => {
@@ -42,114 +42,60 @@ const VideoProcessor = ({ videoFile, activityName, onBack, onRetry, onComplete }
     setIsProcessing(true);
     setProgress(0);
 
-    // Create video URL for preview
-    const url = URL.createObjectURL(file);
-    setVideoUrl(url);
-
-    // Simulate processing with progress
     const progressInterval = setInterval(() => {
       setProgress(prev => {
         if (prev >= 90) {
           clearInterval(progressInterval);
           return 90;
         }
-        return prev + 10;
+        return prev + 5;
       });
-    }, 200);
+    }, 500);
 
-    // Wait for processing simulation
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    clearInterval(progressInterval);
-    setProgress(100);
+    try {
+      const workoutResult: WorkoutResult = await processWorkout(file, activityName, 'video');
 
-    // Get video duration
-    const video = document.createElement('video');
-    video.src = url;
-    
-    const getDuration = (): Promise<string> => {
-      return new Promise((resolve) => {
-        video.onloadedmetadata = () => {
-          const duration = video.duration;
-          const mins = Math.floor(duration / 60);
-          const secs = Math.floor(duration % 60);
-          resolve(`${mins}:${secs.toString().padStart(2, '0')}`);
-        };
-      });
-    };
+      clearInterval(progressInterval);
+      setProgress(100);
 
-    const duration = await getDuration();
+      const formattedMetrics = formatMetricsForDisplay(workoutResult.metrics, activityName);
 
-    // Decode filename
-    const filename = file.name.toLowerCase();
-    const firstLetter = filename.charAt(0);
-    
-    // Extract numbers from filename (e.g., "bratheesh19-1.mp4" -> 19, 1)
-    const numberMatch = filename.match(/(\d+)-(\d+)/);
-    const setsCompleted = numberMatch ? parseInt(numberMatch[1]) : 15;
-    const badSets = numberMatch ? parseInt(numberMatch[2]) : 1;
+      const hasGoodForm = workoutResult.metrics.form_accuracy_percent
+        ? workoutResult.metrics.form_accuracy_percent >= 70
+        : true;
 
-    let processedResult: ProcessingResult;
+      const processedResult: ProcessingResult = {
+        type: hasGoodForm ? 'good' : 'bad',
+        posture: hasGoodForm ? 'Good' : 'Bad',
+        videoUrl: workoutResult.annotated_video_url,
+        metrics: workoutResult.metrics,
+        formattedMetrics
+      };
 
-    switch (firstLetter) {
-      case 'b':
-        processedResult = {
-          type: 'bad',
-          posture: 'Bad',
-          setsCompleted,
-          badSets,
-          duration,
-          videoUrl: url
-        };
-        break;
-      case 'g':
-        processedResult = {
-          type: 'good',
-          posture: 'Good',
-          setsCompleted,
-          badSets,
-          duration,
-          videoUrl: url
-        };
-        break;
-      case 'p':
-        processedResult = {
-          type: 'poor',
-          message: 'Video could not be processed. Poor lighting or detection issue. Please upload or record another video.'
-        };
-        break;
-      case 'a':
-        processedResult = {
-          type: 'anomaly',
-          message: 'Potential cheating or manipulated video identified.'
-        };
-        break;
-      default:
-        // Default to good for demo
-        processedResult = {
-          type: 'good',
-          posture: 'Good',
-          setsCompleted,
-          badSets,
-          duration,
-          videoUrl: url
-        };
-    }
+      setResult(processedResult);
+      setVideoUrl(workoutResult.annotated_video_url);
+      setIsProcessing(false);
 
-    setResult(processedResult);
-    setIsProcessing(false);
-
-    // Handle different result types
-    if (processedResult.type === 'poor') {
-      // Show toast and redirect back
-      toast.error("⚠️ Video could not be processed. Poor lighting or detection issue. Please upload or record another video.");
-      setTimeout(() => {
-        onRetry();
-      }, 2000);
-    } else if (processedResult.type === 'good' || processedResult.type === 'bad') {
-      // Show results and trigger rewards
       setTimeout(() => {
         triggerRewards();
       }, 1000);
+
+    } catch (error) {
+      clearInterval(progressInterval);
+      console.error('Processing error:', error);
+
+      const errorResult: ProcessingResult = {
+        type: 'poor',
+        message: error instanceof Error ? error.message : 'Video could not be processed. Please try again.'
+      };
+
+      setResult(errorResult);
+      setIsProcessing(false);
+
+      toast.error(errorResult.message);
+      setTimeout(() => {
+        onRetry();
+      }, 2000);
     }
   };
 
@@ -171,21 +117,18 @@ const VideoProcessor = ({ videoFile, activityName, onBack, onRetry, onComplete }
 
   const handleSubmitWorkout = () => {
     if (result && (result.type === 'good' || result.type === 'bad')) {
-      // Save to localStorage for Reports tab
       const workoutData = {
         id: Date.now(),
         activityName,
         posture: result.posture,
-        setsCompleted: result.setsCompleted,
-        badSets: result.badSets,
-        duration: result.duration,
+        metrics: result.metrics,
+        formattedMetrics: result.formattedMetrics,
         timestamp: new Date().toISOString(),
         videoUrl: result.videoUrl,
         badgesEarned: ['Form Analyzer', 'Consistency Champion'],
         coinsEarned: result.type === 'good' ? 50 : 25
       };
 
-      // Get existing workout history
       const existingHistory = JSON.parse(localStorage.getItem('workout_history') || '[]');
       existingHistory.push(workoutData);
       localStorage.setItem('workout_history', JSON.stringify(existingHistory));
@@ -305,22 +248,21 @@ const VideoProcessor = ({ videoFile, activityName, onBack, onRetry, onComplete }
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
-                <div className="text-center p-3 rounded-lg bg-secondary/30">
-                  <div className="text-2xl font-bold mb-1">{result.posture}</div>
-                  <p className="text-xs text-muted-foreground">Posture</p>
-                </div>
-                <div className="text-center p-3 rounded-lg bg-secondary/30">
-                  <div className="text-2xl font-bold mb-1">{result.setsCompleted}</div>
-                  <p className="text-xs text-muted-foreground">Sets Completed</p>
-                </div>
-                <div className="text-center p-3 rounded-lg bg-secondary/30">
-                  <div className="text-2xl font-bold mb-1">{result.badSets}</div>
-                  <p className="text-xs text-muted-foreground">Bad Sets</p>
-                </div>
-                <div className="text-center p-3 rounded-lg bg-secondary/30">
-                  <div className="text-2xl font-bold mb-1">{result.duration}</div>
-                  <p className="text-xs text-muted-foreground">Duration</p>
-                </div>
+                {result.formattedMetrics && result.formattedMetrics.length > 0 ? (
+                  result.formattedMetrics.slice(0, 6).map((metric, idx) => (
+                    <div key={idx} className="text-center p-3 rounded-lg bg-secondary/30">
+                      <div className="text-2xl font-bold mb-1">{metric.value}</div>
+                      <p className="text-xs text-muted-foreground">{metric.label}</p>
+                    </div>
+                  ))
+                ) : (
+                  <>
+                    <div className="text-center p-3 rounded-lg bg-secondary/30">
+                      <div className="text-2xl font-bold mb-1">{result.posture || 'N/A'}</div>
+                      <p className="text-xs text-muted-foreground">Result</p>
+                    </div>
+                  </>
+                )}
               </div>
 
               {/* Posture Badge */}
