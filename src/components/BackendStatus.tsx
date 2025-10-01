@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { CheckCircle, XCircle, Loader2 } from 'lucide-react';
+import { CircleCheck as CheckCircle, Circle as XCircle, Loader as Loader2 } from 'lucide-react';
 import { checkBackendHealth } from '@/services/workoutService';
 
 export const BackendStatus = () => {
